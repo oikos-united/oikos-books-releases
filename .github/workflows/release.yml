@@ -18,6 +18,8 @@ jobs:
           - platform: windows-latest
             target: ""
     runs-on: ${{ matrix.platform }}
+    permissions:
+      contents: write
     steps:
       - name: Checkout app source (private)
         uses: actions/checkout@v4

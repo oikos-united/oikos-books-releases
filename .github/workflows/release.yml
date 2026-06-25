@@ -1,0 +1,54 @@
+name: Release
+
+# Builds signed installers for macOS + Windows from the private app source and
+# publishes them here (public) so the in-app auto-updater can fetch them.
+# Requires two repo secrets: SOURCE_PAT (read access to the private app repo)
+# and TAURI_SIGNING_PRIVATE_KEY (the minisign update-signing key).
+on:
+  workflow_dispatch:
+
+jobs:
+  release:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-latest
+            target: aarch64-apple-darwin
+          - platform: windows-latest
+            target: ""
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - name: Checkout app source (private)
+        uses: actions/checkout@v4
+        with:
+          repository: oikos-united/oikos-books
+          token: ${{ secrets.SOURCE_PAT }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - run: npm install
+
+      - name: Build, sign, and publish the release
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
+        with:
+          tagName: app-v__VERSION__
+          releaseName: "Oikos Books v__VERSION__"
+          releaseBody: "Install the file for your computer. Existing installs update themselves."
+          releaseDraft: false
+          prerelease: false
+          args: ${{ matrix.target && format('--target {0}', matrix.target) || '' }}

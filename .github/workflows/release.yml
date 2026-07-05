@@ -51,17 +51,28 @@ jobs:
       - name: Prepare Apple notarization key
         if: matrix.platform == 'macos-latest'
         run: |
-          if printf '%s' "$APPLE_API_KEY_CONTENT" | grep -q "BEGIN PRIVATE KEY"; then
-            printf '%s\n' "$APPLE_API_KEY_CONTENT" > "$RUNNER_TEMP/AuthKey.p8"
-          else
-            printf '%s' "$APPLE_API_KEY_CONTENT" | base64 --decode > "$RUNNER_TEMP/AuthKey.p8" 2>/dev/null || true
+          # Reconstruct a canonical .p8 from ANY complete paste: raw PEM with any
+          # line-wrapping, newlines collapsed to spaces (how single-line secret
+          # stores mangle it), literal 
+ sequences, or base64 of the whole file.
+          # Only genuinely missing characters can fail this.
+          CONTENT="$APPLE_API_KEY_CONTENT"
+          if ! printf '%s' "$CONTENT" | grep -q "PRIVATE KEY"; then
+            CONTENT=$(printf '%s' "$CONTENT" | tr -d '[:space:]' | base64 --decode 2>/dev/null || true)
           fi
+          BODY=$(printf '%s' "$CONTENT" \
+            | sed -e 's/\n/ /g' -e 's/-----BEGIN PRIVATE KEY-----//g' -e 's/-----END PRIVATE KEY-----//g' \
+            | tr -d '[:space:]')
+          {
+            echo "-----BEGIN PRIVATE KEY-----"
+            printf '%s
+' "$BODY" | fold -w 64
+            echo "-----END PRIVATE KEY-----"
+          } > "$RUNNER_TEMP/AuthKey.p8"
           if ! openssl pkey -in "$RUNNER_TEMP/AuthKey.p8" -noout 2>/dev/null; then
-            echo "::error::APPLE_API_KEY_CONTENT does not parse as a valid App Store Connect .p8 key. Re-paste the exact file contents into the repo secret."
+            echo "::error::APPLE_API_KEY_CONTENT is not a complete .p8 key even after normalization — characters are missing. Revoke the key in App Store Connect and generate a fresh one, then paste the new file's contents."
             exit 1
           fi
-          # Canonical 64-column PEM: Tauri's Rust parser rejects unwrapped
-          # bodies with invalidPEMDocument even when openssl accepts them.
           openssl pkey -in "$RUNNER_TEMP/AuthKey.p8" -out "$RUNNER_TEMP/AuthKey-canonical.p8"
           echo "APPLE_API_KEY_PATH=$RUNNER_TEMP/AuthKey-canonical.p8" >> "$GITHUB_ENV"
           echo "notarization key OK"
